@@ -1,0 +1,8 @@
+# 公文分辦結果頁 — Apache 設定
+DirectoryIndex index.php
+Options -Indexes -MultiViews
+
+# 阻擋直接存取 lib/config（雖然 DocumentRoot 應該已經是 web/，雙保險）
+<FilesMatch "\.(php~|bak|swp|orig)$">
+  Require all denied
+</FilesMatch>

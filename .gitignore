@@ -1,1 +1,9 @@
 /AI example code
+
+# --- 系統執行產物與機敏設定 ---
+src/config/config.php
+src/data/
+src/logs/
+
+# --- relay/ 開發期產物（如果有）---
+relay/data/

@@ -62,10 +62,10 @@ function fetch_pending_docs(int $limit = DEFAULT_LIMIT): array {
         $header
     );
 
-    $docs = [];
+    // 讀完整份 CSV（總收文號越大代表越新）
+    $all = [];
     while (($row = fgetcsv($fp)) !== false) {
-        if ($limit > 0 && count($docs) >= $limit) break;
-        // 不完整列補 null 後 combine（避免 array_combine 例外）
+        // 不完整列補空字串後 combine（避免 array_combine 例外）
         if (count($row) < count($header)) {
             $row = array_pad($row, count($header), '');
         } elseif (count($row) > count($header)) {
@@ -76,7 +76,7 @@ function fetch_pending_docs(int $limit = DEFAULT_LIMIT): array {
         $docId = trim((string)($rec['總收文號'] ?? ''));
         if ($docId === '') continue;          // 跳過無主鍵
 
-        $docs[] = [
+        $all[] = [
             'doc_id'       => $docId,
             '收文日期'     => trim((string)($rec['收文日期'] ?? '')),
             '來文機關'     => trim((string)($rec['來文機關'] ?? '')),
@@ -86,7 +86,13 @@ function fetch_pending_docs(int $limit = DEFAULT_LIMIT): array {
         ];
     }
     fclose($fp);
-    return $docs;
+
+    // 依總收文號降序排序（流水號越大越新）→ 取最新 N 筆
+    usort($all, fn($a, $b) => strcmp($b['doc_id'], $a['doc_id']));
+    if ($limit > 0) {
+        $all = array_slice($all, 0, $limit);
+    }
+    return $all;
 }
 
 // ---- 將收文號轉為安全檔名（避免特殊字元）-----------------
@@ -198,7 +204,14 @@ try {
     exit(1);
 }
 echo "  CSV 來源：" . CSV_PATH . "\n";
-echo "  讀取筆數：" . count($docs) . "（limit=$limit）\n\n";
+if ($docs) {
+    $newest = $docs[0]['doc_id']                . ' (' . $docs[0]['收文日期']                . ')';
+    $oldest = $docs[count($docs)-1]['doc_id']   . ' (' . $docs[count($docs)-1]['收文日期']   . ')';
+    echo "  讀取筆數：" . count($docs) . " 筆（最新 N=$limit）\n";
+    echo "  範圍    ：$newest  ←→  $oldest\n\n";
+} else {
+    echo "  讀取筆數：0\n\n";
+}
 
 // 3. 逐筆處理
 $stats = ['total' => 0, 'ok' => 0, 'unknown' => 0, 'error' => 0, 'skipped' => 0, 'correct' => 0];
