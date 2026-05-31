@@ -28,7 +28,7 @@ foreach ($records as $r) {
     $st = $r['status'] ?? 'error';
     if (!isset($stats[$st])) $stats[$st] = 0;
     $stats[$st]++;
-    $u = $r['prediction']['predicted_unit'] ?? '';
+    $u = $r['prediction']['ai_predicted_unit'] ?? $r['prediction']['predicted_unit'] ?? '';
     if ($u !== '') {
         $byUnit[$u] = ($byUnit[$u] ?? 0) + 1;
     }
@@ -47,7 +47,7 @@ foreach ($records as $r) {
         'org'      => (string)($r['input']['來文機關'] ?? ''),
         'kind'     => (string)($r['input']['來文字']   ?? ''),
         'subject'  => (string)($r['input']['來文主旨'] ?? ''),
-        'unit'     => (string)($r['prediction']['predicted_unit'] ?? ''),
+        'unit'     => (string)($r['prediction']['ai_predicted_unit'] ?? $r['prediction']['predicted_unit'] ?? ''),
         'raw'      => (string)($r['prediction']['raw_response']   ?? ''),
         'status'   => (string)($r['status']        ?? ''),
         'ms'       => (float)($r['elapsed_ms']     ?? 0),
@@ -134,7 +134,7 @@ function h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SU
         <th>收文日期</th>
         <th>來文機關</th>
         <th>主旨</th>
-        <th>分辦組室</th>
+        <th>AI分辦組室</th>
         <th>狀態</th>
         <th>耗時</th>
       </tr>

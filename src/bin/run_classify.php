@@ -106,8 +106,8 @@ foreach ($pending as $i => $doc) {
             '來文主旨' => $doc['來文主旨'],
         ],
         'prediction'   => [
-            'predicted_unit' => $r['pred'],
-            'raw_response'   => $r['raw'],
+            'ai_predicted_unit' => $r['pred'],
+            'raw_response'      => $r['raw'],
         ],
     ];
 
