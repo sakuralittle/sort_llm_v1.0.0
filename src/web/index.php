@@ -66,6 +66,8 @@ function h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SU
 <meta charset="utf-8">
 <title><?= h($title) ?> - <?= h($displayDate) ?></title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/jpeg" href="ciallo.jpg">
+<link rel="shortcut icon" type="image/jpeg" href="ciallo.jpg">
 <?php if ($autoRefresh > 0): ?>
 <meta http-equiv="refresh" content="<?= (int)$autoRefresh ?>">
 <?php endif; ?>
