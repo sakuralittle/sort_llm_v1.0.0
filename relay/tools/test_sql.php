@@ -3,7 +3,7 @@
  * T3：MySQL 連線與 schema 探勘
  * ----------------------------------------------------------
  * 用途：
- *   1. 確認能連上 MySQL（透過 SSH tunnel：127.0.0.1:3306）
+ *   1. 確認能連上 MySQL（透過 SSH tunnel：127.0.0.1:13306）
  *   2. 列出指定資料表的欄位
  *   3. 抓最近 5 筆樣本（確認資料內容、編碼、null 狀況）
  *   4. 計算今日筆數
@@ -17,7 +17,7 @@ declare(strict_types=1);
 
 const DB_DRIVER   = 'mysql';
 const DB_HOST     = '127.0.0.1';     // 走 SSH tunnel
-const DB_PORT     = 3306;
+const DB_PORT     = 13306;           // 與 ssh_tunnel.bat 的 LOCAL_PORT 一致
 const DB_NAME     = 'EXFODBS';
 const DB_USER     = 'exfoselect';
 const DB_PASS     = 'EXFO@34qwe';
@@ -52,7 +52,7 @@ try {
     echo "    [FAIL] " . $e->getMessage() . "\n";
     echo "    常見原因：\n";
     echo "      - pdo_mysql 未啟用（執行 php -m | findstr mysql 確認）\n";
-    echo "      - SSH tunnel 沒開（127.0.0.1:3306 不通）\n";
+    echo "      - SSH tunnel 沒開（127.0.0.1:13306 不通）\n";
     echo "      - 帳密錯誤 / DB 名稱錯誤 / 該帳號無 EXFODBS 存取權\n";
     exit(1);
 }

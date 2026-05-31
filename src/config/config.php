@@ -10,7 +10,7 @@ return [
     'db' => [
         'driver' => 'mysql',           // mysql / sqlsrv / odbc
         'host'   => '127.0.0.1',       // 走 SSH tunnel
-        'port'   => 3306,              // 與 ssh_tunnel.bat 的 LOCAL_PORT 一致
+        'port'   => 13306,              // 與 ssh_tunnel.bat 的 LOCAL_PORT 一致
         'name'   => 'EXFODBS',
         'user'   => 'exfoselect',
         'pass'   => 'EXFO@34qwe',
