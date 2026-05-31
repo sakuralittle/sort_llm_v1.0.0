@@ -1,7 +1,7 @@
 /AI example code
 
 # --- 系統執行產物與機敏設定 ---
-src/config/config.php
+# src/config/config.php
 src/data/
 src/logs/
 
