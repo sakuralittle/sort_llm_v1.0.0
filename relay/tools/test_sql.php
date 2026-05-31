@@ -1,50 +1,42 @@
 <?php
 /**
- * T3：SQL Server 連線與 schema 探勘
+ * T3：MySQL 連線與 schema 探勘
  * ----------------------------------------------------------
  * 用途：
- *   1. 確認能連上 SQL Server
- *   2. 列出指定資料表的欄位（協助確認欄位名稱）
+ *   1. 確認能連上 MySQL（透過 SSH tunnel：127.0.0.1:3306）
+ *   2. 列出指定資料表的欄位
  *   3. 抓最近 5 筆樣本（確認資料內容、編碼、null 狀況）
+ *   4. 計算今日筆數
  *
  * 執行：
- *   設好下方常數後 → php test_sql.php
+ *   php relay\tools\test_sql.php
  * ----------------------------------------------------------
- * ★ 請依實際環境修改下列常數 ★
  */
 
 declare(strict_types=1);
 
-const DB_DRIVER   = 'sqlsrv';        // 'sqlsrv' 或 'odbc'（依擴充而定）
-const DB_HOST     = '192.168.x.x';   // ← TODO 改成 SQL Server IP 或 hostname
-const DB_PORT     = 1433;
-const DB_NAME     = 'YourDatabase';  // ← TODO 改成資料庫名
-const DB_USER     = 'your_user';     // ← TODO
-const DB_PASS     = 'your_pass';     // ← TODO（實際正式環境請改用環境變數）
-const DB_TABLE    = 'dbo.公文表';    // ← TODO 改成公文資料表的 schema.table
-const DB_DATE_COL = '收文日期';       // ← TODO 用來篩「今日」的欄位
+const DB_DRIVER   = 'mysql';
+const DB_HOST     = '127.0.0.1';     // 走 SSH tunnel
+const DB_PORT     = 3306;
+const DB_NAME     = 'EXFODBS';
+const DB_USER     = 'exfoselect';
+const DB_PASS     = 'EXFO@34qwe';
+const DB_TABLE    = 'IFTDC_INDCM';
+const DB_DATE_COL = 'INDATE';
+const DB_CHARSET  = 'utf8mb4';
 
-// ---- 建立 PDO 連線字串 ----
 function build_dsn(): string {
-    if (DB_DRIVER === 'sqlsrv') {
-        // 需要 pdo_sqlsrv 擴充
-        return sprintf(
-            'sqlsrv:Server=%s,%d;Database=%s;Encrypt=no;TrustServerCertificate=yes',
-            DB_HOST, DB_PORT, DB_NAME
-        );
-    }
-    // ODBC 範例（需先在系統建立 ODBC DSN，或用 driver 字串）
     return sprintf(
-        'odbc:Driver={ODBC Driver 17 for SQL Server};Server=%s,%d;Database=%s;',
-        DB_HOST, DB_PORT, DB_NAME
+        'mysql:host=%s;port=%d;dbname=%s;charset=%s',
+        DB_HOST, DB_PORT, DB_NAME, DB_CHARSET
     );
 }
 
 echo "==========================================\n";
-echo " T3  SQL Server 連線與 schema 探勘\n";
+echo " T3  MySQL 連線與 schema 探勘\n";
 echo "==========================================\n";
 echo " Driver : " . DB_DRIVER . "\n";
-echo " Host   : " . DB_HOST . "\n";
+echo " Host   : " . DB_HOST . ":" . DB_PORT . "\n";
 echo " DB     : " . DB_NAME . "\n";
 echo " Table  : " . DB_TABLE . "\n\n";
 
@@ -59,41 +51,37 @@ try {
 } catch (PDOException $e) {
     echo "    [FAIL] " . $e->getMessage() . "\n";
     echo "    常見原因：\n";
-    echo "      - pdo_sqlsrv 未啟用（檢查 phpinfo() 或執行 test_env.php）\n";
-    echo "      - 帳密錯誤\n";
-    echo "      - SQL Server 未啟用 TCP/IP 或防火牆擋 1433\n";
-    echo "      - hostname / IP 寫錯\n";
+    echo "      - pdo_mysql 未啟用（執行 php -m | findstr mysql 確認）\n";
+    echo "      - SSH tunnel 沒開（127.0.0.1:3306 不通）\n";
+    echo "      - 帳密錯誤 / DB 名稱錯誤 / 該帳號無 EXFODBS 存取權\n";
     exit(1);
 }
 
-// ---- 步驟 2：列出欄位 schema ----
+// ---- 步驟 2：列出欄位 ----
 echo "[2] 列出資料表欄位...\n";
-$tableParts = explode('.', DB_TABLE);
-$schema = count($tableParts) === 2 ? $tableParts[0] : 'dbo';
-$table  = end($tableParts);
-
 try {
     $stmt = $pdo->prepare("
-        SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+        SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, COLUMN_COMMENT
         FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table
+        WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl
         ORDER BY ORDINAL_POSITION
     ");
-    $stmt->execute([':schema' => $schema, ':table' => $table]);
+    $stmt->execute([':db' => DB_NAME, ':tbl' => DB_TABLE]);
     $cols = $stmt->fetchAll();
     if (!$cols) {
-        echo "    [FAIL] 找不到資料表 " . DB_TABLE . "（檢查 schema.table 名稱）\n";
+        echo "    [FAIL] 找不到資料表 " . DB_TABLE . "（檢查表名大小寫，MySQL 在 Linux 上預設區分大小寫）\n";
         exit(1);
     }
     printf("    [OK] 共 %d 個欄位：\n", count($cols));
-    printf("    %-30s %-15s %-8s %s\n", '欄位名', '型別', '長度', 'NULL');
-    echo "    " . str_repeat('-', 70) . "\n";
+    printf("    %-25s %-15s %-8s %-6s %s\n", '欄位名', '型別', '長度', 'NULL', '註解');
+    echo "    " . str_repeat('-', 80) . "\n";
     foreach ($cols as $c) {
-        printf("    %-30s %-15s %-8s %s\n",
+        printf("    %-25s %-15s %-8s %-6s %s\n",
                $c['COLUMN_NAME'],
                $c['DATA_TYPE'],
                $c['CHARACTER_MAXIMUM_LENGTH'] ?? '-',
-               $c['IS_NULLABLE']);
+               $c['IS_NULLABLE'],
+               mb_substr((string)($c['COLUMN_COMMENT'] ?? ''), 0, 30));
     }
     echo "\n";
 } catch (PDOException $e) {
@@ -102,10 +90,10 @@ try {
 }
 
 // ---- 步驟 3：抓最近 5 筆 ----
-echo "[3] 抓最近 5 筆資料（限 TOP 5）...\n";
+echo "[3] 抓最近 5 筆資料...\n";
 try {
-    // 先抓 TOP 5 看看資料長相
-    $sql = sprintf("SELECT TOP 5 * FROM %s ORDER BY %s DESC", DB_TABLE, DB_DATE_COL);
+    $sql = sprintf("SELECT * FROM `%s` ORDER BY `%s` DESC LIMIT 5",
+                   DB_TABLE, DB_DATE_COL);
     $stmt = $pdo->query($sql);
     $rows = $stmt->fetchAll();
     if (!$rows) {
@@ -130,17 +118,15 @@ try {
 // ---- 步驟 4：今日公文計數 ----
 echo "[4] 今日公文計數...\n";
 try {
-    $today = date('Y-m-d');
-    $sql = sprintf("SELECT COUNT(*) AS cnt FROM %s WHERE CAST(%s AS DATE) = ?",
+    $sql = sprintf("SELECT COUNT(*) AS cnt FROM `%s` WHERE DATE(`%s`) = CURDATE()",
                    DB_TABLE, DB_DATE_COL);
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$today]);
-    $cnt = (int)$stmt->fetchColumn();
-    printf("    [OK] %s 共 %d 筆公文\n", $today, $cnt);
+    $stmt = $pdo->query($sql);
+    $cnt  = (int)$stmt->fetchColumn();
+    printf("    [OK] %s 共 %d 筆公文\n", date('Y-m-d'), $cnt);
 } catch (PDOException $e) {
     echo "    [WARN] " . $e->getMessage() . "\n";
 }
 
 echo "\n==========================================\n";
-echo " 完成。請把上方欄位清單貼給開發者，以便 M1 撰寫正式 SELECT 語句。\n";
+echo " 完成。請把上方欄位清單貼給開發者。\n";
 echo "==========================================\n";

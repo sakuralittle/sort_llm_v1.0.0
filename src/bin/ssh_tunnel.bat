@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  SSH Tunnel: local 1433 -> jump host -> internal SQL Server 1433
+REM  SSH Tunnel: local 3306 -> jump host -> internal MySQL 3306
 REM  Use Windows 10+ built-in OpenSSH (ssh.exe).
 REM
 REM  Usage:
@@ -8,17 +8,17 @@ REM    1. Double click to run; keep this window open while tunnel is needed.
 REM    2. To stop: close this window or press Ctrl+C.
 REM
 REM  Verify (in another cmd window):
-REM    powershell -c "Test-NetConnection 127.0.0.1 -Port 1433"
+REM    powershell -c "Test-NetConnection 127.0.0.1 -Port 3306"
 REM ============================================================
 
 setlocal
 
 REM ---- Local listening port (must match db.port in src\config\config.php)
-set LOCAL_PORT=1433
+set LOCAL_PORT=3306
 
-REM ---- Internal DB host (visible from the jump host 192.168.6.57)
+REM ---- Internal DB host (visible from the jump host 192.168.6.57). MySQL = 3306
 set DB_HOST=192.168.6.58
-set DB_PORT=1433
+set DB_PORT=3306
 
 REM ---- Jump host (the AP server we SSH into)
 set JUMP_USER=root
