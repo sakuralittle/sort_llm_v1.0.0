@@ -115,14 +115,15 @@ try {
     exit(1);
 }
 
-// ---- 步驟 4：今日公文計數 ----
+// ---- 步驟 4：今日公文計數（INDATE 是民國年字串）----
 echo "[4] 今日公文計數...\n";
 try {
-    $sql = sprintf("SELECT COUNT(*) AS cnt FROM `%s` WHERE DATE(`%s`) = CURDATE()",
-                   DB_TABLE, DB_DATE_COL);
-    $stmt = $pdo->query($sql);
-    $cnt  = (int)$stmt->fetchColumn();
-    printf("    [OK] %s 共 %d 筆公文\n", date('Y-m-d'), $cnt);
+    $rocDate = sprintf('%d/%s', (int)date('Y') - 1911, date('m/d'));  // 例：115/05/31
+    $sql = sprintf("SELECT COUNT(*) AS cnt FROM `%s` WHERE `%s` = ?", DB_TABLE, DB_DATE_COL);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$rocDate]);
+    $cnt = (int)$stmt->fetchColumn();
+    printf("    [OK] 民國 %s（西元 %s）共 %d 筆公文\n", $rocDate, date('Y-m-d'), $cnt);
 } catch (PDOException $e) {
     echo "    [WARN] " . $e->getMessage() . "\n";
 }

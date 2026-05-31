@@ -23,7 +23,7 @@ return [
             'date'    => 'INDATE',
             'org'     => 'GUNAME',
             'subject' => 'THEME',
-            // 'kind' => 'INKIND',
+            'kind'    => 'THEYNO1',     // 來文字（例：實管 / 溪育 / 溪總）
         ],
 
         'lookback_days' => 1,
