@@ -134,8 +134,8 @@ function h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SU
         <th>收文日期</th>
         <th>來文機關</th>
         <th>主旨</th>
-        <th>AI分辦組室</th>
-        <th>AI分文狀態</th>
+        <th>AI分辦建議</th>
+        <th>AI判斷狀態</th>
         <th>AI分辨所費時間</th>
       </tr>
     </thead>
