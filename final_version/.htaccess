@@ -1,0 +1,27 @@
+# ============================================================
+#  公文分辦 — Apache 設定
+#  讓本資料夾可在 XAMPP htdocs 下安全運作
+#  訪問入口：https://<host>/<本資料夾>/  → index.php
+# ============================================================
+
+DirectoryIndex index.php
+Options -Indexes -MultiViews
+
+# ---- 阻擋直接存取設定檔（含 DB 密碼）----
+<Files "config.php">
+    Require all denied
+</Files>
+
+# ---- 阻擋備份／暫存檔 ----
+<FilesMatch "\.(php~|bak|swp|orig|inc)$">
+    Require all denied
+</FilesMatch>
+
+# ---- 阻擋 data / logs 目錄（執行時自動建立）----
+RewriteEngine On
+RewriteRule ^(data|logs)(/|$) - [F,L]
+
+# ---- 阻擋 .bat 被當靜態檔下載 ----
+<FilesMatch "\.(bat|cmd|sh)$">
+    Require all denied
+</FilesMatch>

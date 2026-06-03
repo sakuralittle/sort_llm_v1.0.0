@@ -157,7 +157,10 @@ php <PROJECT_DIR>\src\bin\run_classify.php 5
 
 確認 `<PROJECT_DIR>\src\data\YYYYMMDD\*.json` 有產出且內容正常。
 
-### 7. 設定 Apache vhost（HTTP + HTTPS）
+### 7. 設定 Apache vhost（HTTPS，獨立 port 8443）
+
+> **設計策略**：使用獨立 port **8443**，完全不碰原有 80 / 443 服務（例如 htdocs 下的 alertinfo 等既有網站）。  
+> 同事訪問 URL：`https://<中繼主機IP>:8443/`，無需設 hosts 檔。
 
 **步驟 7a — 複製 vhost 範本到 Apache**：
 
@@ -170,47 +173,68 @@ copy <PROJECT_DIR>\src\apache\sort-llm.vhost.example.conf C:\xampp\apache\conf\e
 打開 `C:\xampp\apache\conf\extra\sort-llm.vhost.conf`，找到：
 
 ```apache
-Define SORTLLM_HOME "E:/program_dev/sort_llm_v1.0.0/src"
+Define SORTLLM_HOME "C:/program_dev/sort_llm_v1.0.0/src"
 ```
 
-改成你的實際路徑（**用正斜線 `/`，不是反斜線 `\`**）：
+改成你的實際路徑（**用正斜線 `/`，不是反斜線 `\`**）。
+
+**步驟 7c — 在 `C:\xampp\apache\conf\httpd.conf` 末端加入 Include**：
 
 ```apache
-Define SORTLLM_HOME "D:/projects/sort_llm/src"
-```
-
-**步驟 7c — 修改 `C:\xampp\apache\conf\httpd.conf`**，加入或確認以下三項：
-
-```apache
-# 1. 載入需要的模組（XAMPP 預設有寫但前面有 #，移除即可）
-LoadModule rewrite_module       modules/mod_rewrite.so
-LoadModule ssl_module           modules/mod_ssl.so
-LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
-
-# 2. Listen 兩個 port
-Listen 80
-Listen 443
-
-# 3. 載入我們的 vhost（加在檔案最後）
+# === sort-llm 公文分辦 vhost（獨立 port 8443）===
 Include conf/extra/sort-llm.vhost.conf
 ```
 
-**步驟 7d — 重啟 Apache**：
+並確認以下模組已啟用（XAMPP 預設有寫但前面有 `#`，移除即可）：
 
-XAMPP Control Panel → Apache 按「Stop」再按「Start」。或：
-
-```powershell
-C:\xampp\apache\bin\httpd.exe -k restart
+```apache
+LoadModule ssl_module           modules/mod_ssl.so
+LoadModule socache_shmcb_module modules/mod_socache_shmcb.so
+LoadModule headers_module       modules/mod_headers.so
 ```
 
-**步驟 7e — 瀏覽器測試**：
+> 注意：**不要**在 httpd.conf 加 `Listen 8443`，vhost 範本檔內部已經有了。
 
-- http://localhost/  → 應自動跳轉到 https://sort-llm.local/
-- https://localhost/ → 首次連線會顯示「不安全憑證」警告（XAMPP self-signed），按「進階 → 仍要前往」即可看到網頁
+**步驟 7d — 語法驗證**：
 
-> 內網其他電腦要連的話，把 `localhost` 換成中繼主機的 IP（例如 `https://192.168.x.x/`）。  
-> 若要用 `sort-llm.local` 漂亮網址，需在各 client 機器的 `C:\Windows\System32\drivers\etc\hosts` 加：  
-> `<中繼主機IP>  sort-llm.local`
+```powershell
+& "C:\xampp\apache\bin\httpd.exe" -t
+```
+
+預期看到 `Syntax OK`。如果有錯誤訊息，**先不要重啟 Apache**，把錯誤貼出來排查。
+
+**步驟 7e — 重啟 Apache**：
+
+XAMPP Control Panel → Apache 按「**Stop**」再按「**Start**」（**一定要 Stop 再 Start，不能只 Restart**，否則新的 Listen 8443 不會生效）。
+
+驗證 8443 已 listening：
+
+```powershell
+netstat -ano | Select-String "LISTENING" | Select-String ":8443\s"
+```
+
+**步驟 7f — Windows 防火牆放行 8443**：
+
+開「**Windows Defender 防火牆**」→「**進階設定**」→「**輸入規則**」→「**新增規則**」：
+
+- 規則類型：**連接埠**
+- 通訊協定：**TCP**
+- 特定本機連接埠：**8443**
+- 動作：**允許連線**
+- 設定檔：勾選「**網域**」與「**私人**」（不要勾「公用」）
+- 名稱：`sort-llm 8443`
+
+**步驟 7g — 瀏覽器測試**：
+
+- **本機驗證**：`https://localhost:8443/`
+- **同事訪問**：`https://<中繼主機IP>:8443/`
+
+第一次會顯示「您的連線不是私人連線」警告（self-signed 憑證），點「**進階 → 仍要前往**」即可。  
+取得中繼主機內網 IP：
+
+```powershell
+ipconfig | Select-String "IPv4"
+```
 
 ### 8. Windows 工作排程器
 
@@ -231,7 +255,7 @@ C:\xampp\apache\bin\httpd.exe -k restart
 1. `ssh_tunnel.bat` 自動啟動（放 `shell:startup` 或服務化）
 2. Apache 自動啟動（Windows 服務）
 3. Windows 工作排程器自動觸發 `run_classify.bat`（按設定間隔）
-4. 使用者開瀏覽器看 `https://<中繼主機>/` → 直接看到當日結果
+4. 使用者開瀏覽器看 `https://<中繼主機IP>:8443/` → 直接看到當日結果
 
 ---
 
@@ -241,7 +265,7 @@ C:\xampp\apache\bin\httpd.exe -k restart
 - `ssh_tunnel.bat`（含跳板機 IP/帳號）建議也加入 `.gitignore`
 - Apache vhost 的 `DocumentRoot` 只指到 `src/web/`，**`config / lib / data / logs / bin / apache` 全部在 web root 之外**，URL 無法存取
 - 額外用 `Require all denied` 對上述目錄做縱深防禦
-- HTTPS 強制（HTTP 自動 redirect 到 HTTPS）
+- HTTPS only（獨立 port 8443，不碰原有 80 / 443）
 - 預設 SSL cert 為 XAMPP 內建 self-signed，可改用 mkcert 簽發內網 CA 信任的憑證
 
 ---
