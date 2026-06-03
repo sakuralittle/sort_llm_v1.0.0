@@ -585,18 +585,33 @@ function render_web(array $cfg): void
     $rangeDays = max(1, (int)($cfg['web']['range_days'] ?? 5));
 
     // 模式判斷：
-    //   ?date=YYYYMMDD → 單日檢視
-    //   無此參數       → 預設聚合最近 N 天（含今天）
-    $rawDate = (string)($_GET['date'] ?? '');
-    $singleDayMode = ($rawDate !== '' && preg_match('/^\d{8}$/', $rawDate));
+    //   ?date=YYYY-MM-DD 或 YYYYMMDD → 單日檢視
+    //   無此參數                      → 預設聚合最近 N 天（含今天）
+    // 注意：HTML5 <input type="date"> 提交格式為 YYYY-MM-DD，需先去除分隔符。
+    $rawDate    = (string)($_GET['date'] ?? '');
+    $normalized = preg_replace('/[-\/.]/', '', $rawDate);
+    $singleDayMode = ($normalized !== '' && preg_match('/^\d{8}$/', $normalized) === 1);
 
     if ($singleDayMode) {
-        $dateStr = $rawDate;
+        $dateStr = $normalized;          // 內部一律用 YYYYMMDD 對應 data/ 子資料夾
         $records = $store->listForDate($dateStr);
     } else {
-        $dateStr = date('Ymd');         // 日期選擇器顯示用
+        $dateStr = date('Ymd');          // 日期選擇器顯示用（會被轉成 YYYY-MM-DD）
         $records = $store->listForRange($rangeDays);
     }
+
+    // 排序：收文日期 DESC（新→舊）→ predicted_at DESC → doc_id DESC
+    // 收文日期是民國年字串（例 "115/05/31"），需轉西元 YYYYMMDD 才能正確字串比較
+    // （否則跨月會出錯，例如 "114/9/1" 字串比較會 < "114/10/1"）。
+    usort($records, static function ($a, $b) {
+        $da = roc_to_ad((string)($a['input']['收文日期'] ?? ''));
+        $db = roc_to_ad((string)($b['input']['收文日期'] ?? ''));
+        if ($da !== $db) return strcmp($db, $da);
+        $pa = (string)($a['predicted_at'] ?? '');
+        $pb = (string)($b['predicted_at'] ?? '');
+        if ($pa !== $pb) return strcmp($pb, $pa);
+        return strcmp((string)($b['doc_id'] ?? ''), (string)($a['doc_id'] ?? ''));
+    });
 
     $stats  = ['total' => count($records), 'ok' => 0, 'unknown' => 0, 'error' => 0];
     $byUnit = [];
