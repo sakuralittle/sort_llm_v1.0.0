@@ -1,34 +1,34 @@
 @echo off
 REM ============================================================
 REM  SSH Tunnel: local 13306 -> jump host -> internal MySQL 3306
-REM  使用 Windows 10+ 內建 OpenSSH（ssh.exe）
+REM  Uses Windows 10+ built-in OpenSSH (ssh.exe).
 REM
-REM  使用方式：
-REM    1. 雙擊執行；視窗保持開啟代表隧道運作中
-REM    2. 結束方式：關閉視窗或按 Ctrl+C
+REM  Usage:
+REM    1. Double click to run; keep this window open while tunnel is needed.
+REM    2. To stop: close this window or press Ctrl+C.
 REM
-REM  驗證（另開 cmd）：
+REM  Verify (in another cmd window):
 REM    powershell -c "Test-NetConnection 127.0.0.1 -Port 13306"
 REM
-REM  常駐建議：把本檔捷徑放到 shell:startup，開機自啟動
+REM  Tip: put a shortcut to this bat in shell:startup for auto-start.
 REM ============================================================
 
 setlocal
 
-REM ---- 本機監聽埠（必須與 config.php 的 db.port 一致）
-REM     避開本機 MySQL 預設 3306，這裡用 13306
+REM ---- Local listening port (must match db.port in config.php)
+REM     Avoid 3306 if local MySQL uses it. Using 13306.
 set LOCAL_PORT=13306
 
-REM ---- 內網 DB（從跳板機看出去的位址）
+REM ---- Internal DB host (visible from the jump host).
 set DB_HOST=192.168.6.58
 set DB_PORT=3306
 
-REM ---- 跳板主機
+REM ---- Jump host (the AP server we SSH into).
 set JUMP_USER=root
 set JUMP_HOST=192.168.6.57
 set JUMP_PORT=22
 
-REM ---- SSH 金鑰（找不到則 fallback 密碼登入）
+REM ---- SSH key (optional). If missing -> falls back to password auth.
 set KEY_FILE=%USERPROFILE%\.ssh\id_ed25519
 
 echo ============================================================
