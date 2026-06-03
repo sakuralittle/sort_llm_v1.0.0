@@ -35,7 +35,7 @@ final class Logger
     {
         $logDir = rtrim($logDir, "\\/");
         if (!is_dir($logDir) && !@mkdir($logDir, 0777, true) && !is_dir($logDir)) {
-            throw new RuntimeException("無法建立 log 目錄：$logDir");
+            throw new RuntimeException("Cannot create log directory: $logDir");
         }
         $this->logFile = $logDir . DIRECTORY_SEPARATOR . date('Ymd') . '.log';
         $this->echo    = $echo;
@@ -74,7 +74,7 @@ final class JsonStore
     {
         $this->baseDir = rtrim($baseDir, "\\/");
         if (!is_dir($this->baseDir) && !@mkdir($this->baseDir, 0777, true) && !is_dir($this->baseDir)) {
-            throw new RuntimeException("無法建立資料目錄：{$this->baseDir}");
+            throw new RuntimeException("Cannot create data directory: {$this->baseDir}");
         }
     }
 
@@ -82,7 +82,7 @@ final class JsonStore
     {
         $dir = $this->baseDir . DIRECTORY_SEPARATOR . $dateStr;
         if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
-            throw new RuntimeException("無法建立資料夾：$dir");
+            throw new RuntimeException("Cannot create folder: $dir");
         }
         return $dir;
     }
@@ -102,6 +102,25 @@ final class JsonStore
     public function isProcessed(string $dateStr, string $docId): bool
     {
         return file_exists($this->pathFor($dateStr, $docId));
+    }
+
+    /**
+     * 在最近 N 天的資料夾中（含今天）找有沒有處理過該 doc。
+     * 用於 lookback_days > 1 時，避免同一筆公文每天被重複跑 AI。
+     */
+    public function isProcessedRecent(string $docId, int $days): bool
+    {
+        $today = new DateTimeImmutable('today');
+        $safe  = self::sanitize($docId);
+        for ($i = 0; $i < max(1, $days); $i++) {
+            $d   = $today->modify("-$i day")->format('Ymd');
+            $dir = $this->baseDir . DIRECTORY_SEPARATOR . $d;
+            if (!is_dir($dir)) continue;
+            if (file_exists($dir . DIRECTORY_SEPARATOR . $safe . '.json')) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 原子寫入（tmp + rename） */
@@ -143,6 +162,32 @@ final class JsonStore
         usort($records, fn($a, $b) =>
             strcmp((string)($b['predicted_at'] ?? ''), (string)($a['predicted_at'] ?? '')));
         return $records;
+    }
+
+    /**
+     * 讀最近 N 天（含今天）所有資料夾的 JSON，整合排序。
+     * 同一 doc_id 重複出現時保留 predicted_at 最新的那筆。
+     */
+    public function listForRange(int $days): array
+    {
+        $today = new DateTimeImmutable('today');
+        $byId  = [];
+        for ($i = 0; $i < max(1, $days); $i++) {
+            $d = $today->modify("-$i day")->format('Ymd');
+            foreach ($this->listForDate($d) as $r) {
+                $id = (string)($r['doc_id'] ?? '');
+                if ($id === '') continue;
+                $cur = $byId[$id] ?? null;
+                if ($cur === null
+                    || strcmp((string)($r['predicted_at'] ?? ''), (string)($cur['predicted_at'] ?? '')) > 0) {
+                    $byId[$id] = $r;
+                }
+            }
+        }
+        $out = array_values($byId);
+        usort($out, fn($a, $b) =>
+            strcmp((string)($b['predicted_at'] ?? ''), (string)($a['predicted_at'] ?? '')));
+        return $out;
     }
 }
 
@@ -218,14 +263,14 @@ final class AiClassifier
         curl_close($ch);
 
         if ($code !== 200) {
-            return ['ok' => false, 'msg' => "AI 主機無法連線（HTTP $code, $err）"];
+            return ['ok' => false, 'msg' => "AI host unreachable (HTTP $code, $err)"];
         }
         $tags  = json_decode((string)$body, true);
         $names = array_map(fn($m) => $m['name'] ?? '', $tags['models'] ?? []);
         if (!in_array($this->model, $names, true)) {
-            return ['ok' => false, 'msg' => "AI 主機可連，但找不到模型 {$this->model}（現有：" . implode(', ', $names) . ")"];
+            return ['ok' => false, 'msg' => "AI host OK, but model {$this->model} not found (available: " . implode(', ', $names) . ")"];
         }
-        return ['ok' => true, 'msg' => 'AI 主機與模型 OK'];
+        return ['ok' => true, 'msg' => 'AI host and model OK'];
     }
 
     private function httpPost(string $url, array $body): array
@@ -365,6 +410,19 @@ final class DocRepository
     }
 }
 
+/**
+ * 民國年字串 → 西元 YYYYMMDD（例："115/05/31" → "20260531"）
+ * 解析失敗時回傳空字串，呼叫端應自行 fallback。
+ */
+function roc_to_ad(string $rocDate): string
+{
+    if (!preg_match('/^(\d{1,3})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/', trim($rocDate), $m)) {
+        return '';
+    }
+    $y = (int)$m[1] + 1911;
+    return sprintf('%04d%02d%02d', $y, (int)$m[2], (int)$m[3]);
+}
+
 // =============================================================
 //  入口：依 SAPI 切換 CLI / HTTP 模式
 // =============================================================
@@ -386,21 +444,22 @@ function run_classify(array $cfg, array $argv): void
     $ai     = new AiClassifier($cfg['ai']);
     $repo   = new DocRepository($cfg['db']);
 
-    $limit = isset($argv[1]) && ctype_digit((string)$argv[1]) ? (int)$argv[1] : 0;
-    $today = date('Ymd');
-    $t0    = microtime(true);
+    $limit    = isset($argv[1]) && ctype_digit((string)$argv[1]) ? (int)$argv[1] : 0;
+    $today    = date('Ymd');
+    $lookback = (int)($cfg['db']['lookback_days'] ?? 1);
+    $t0       = microtime(true);
 
     $logger->raw('==========================================');
-    $logger->raw(' 公文分辦 AI 推論執行（' . date('Y-m-d H:i:s') . '）');
+    $logger->raw(' Doc-classify AI run (' . date('Y-m-d H:i:s') . ')');
     $logger->raw(' Model    : ' . $ai->model());
     $logger->raw(' Endpoint : ' . $ai->baseUrl());
-    $logger->raw(' Lookback : ' . (int)$cfg['db']['lookback_days'] . ' 天');
-    if ($limit > 0) $logger->raw(' Limit    : ' . $limit . ' 筆（測試用）');
+    $logger->raw(' Lookback : ' . $lookback . ' day(s)');
+    if ($limit > 0) $logger->raw(' Limit    : ' . $limit . ' (test mode)');
     $logger->raw('==========================================');
 
-    // 1. 確保當日資料夾
-    $dayDir = $store->dayDir($today);
-    $logger->info("資料夾：$dayDir");
+    // 1. Ensure today's folder exists (so we always have a per-day folder).
+    $store->dayDir($today);
+    $logger->info('Data root: ' . $cfg['paths']['data_dir']);
 
     // 2. AI 健康檢查
     $ping = $ai->ping();
@@ -417,24 +476,24 @@ function run_classify(array $cfg, array $argv): void
             (int)($cfg['db']['max_rows']      ?? 500)
         );
     } catch (Throwable $e) {
-        $logger->error('SQL 撈取失敗：' . $e->getMessage());
-        $logger->error('提示：確認 ssh_tunnel.bat 已啟動、config.php 連線資訊正確。');
+        $logger->error('SQL fetch failed: ' . $e->getMessage());
+        $logger->error('Hint: make sure ssh_tunnel.bat is running and config.php DB settings are correct.');
         exit(1);
     }
-    $logger->info('SQL 候選公文：' . count($docs) . ' 筆');
+    $logger->info('SQL candidate docs: ' . count($docs));
 
-    // 4. 過濾已處理
+    // 4. 過濾已處理（在最近 lookback 天內任一資料夾出現過 → 視為已處理，避免重跑）
     $pending = [];
     $skipped = 0;
     foreach ($docs as $d) {
-        if ($store->isProcessed($today, $d['doc_id'])) { $skipped++; continue; }
+        if ($store->isProcessedRecent($d['doc_id'], $lookback)) { $skipped++; continue; }
         $pending[] = $d;
     }
-    $logger->info("已處理略過：$skipped 筆；待處理：" . count($pending) . ' 筆');
+    $logger->info("Already processed (skipped): $skipped; pending: " . count($pending));
 
     if ($limit > 0 && count($pending) > $limit) {
         $pending = array_slice($pending, 0, $limit);
-        $logger->info('套用 limit，實際處理：' . count($pending) . ' 筆');
+        $logger->info('Limit applied, actually processing: ' . count($pending));
     }
 
     // 5. 逐筆呼叫 AI
@@ -472,8 +531,12 @@ function run_classify(array $cfg, array $argv): void
             ],
         ];
 
+        // 用公文「收文日期」當資料夾（民國年 → 西元 YYYYMMDD），無法解析時退回今天
+        $docDate = roc_to_ad((string)$doc['收文日期']);
+        if ($docDate === '') $docDate = $today;
+
         try {
-            $store->write($today, $docId, $record);
+            $store->write($docDate, $docId, $record);
         } catch (Throwable $e) {
             $logger->error("[WRITE-ERR] $docId : " . $e->getMessage());
             $stats['error']++;
@@ -483,8 +546,8 @@ function run_classify(array $cfg, array $argv): void
         $stats[$r['status']]++;
         $label = $r['pred'] !== '' ? $r['pred'] : ('「' . mb_substr($r['raw'], 0, 20) . '」');
         $logger->raw(sprintf(
-            '  [%3d] [%-7s] %s → %s (%.0f ms)',
-            $i + 1, strtoupper($r['status']), $docId, $label, $r['ms']
+            '  [%3d] [%-7s] %s [%s] → %s (%.0f ms)',
+            $i + 1, strtoupper($r['status']), $docId, $docDate, $label, $r['ms']
         ));
     }
 
@@ -494,18 +557,18 @@ function run_classify(array $cfg, array $argv): void
 
     $logger->raw('');
     $logger->raw('==========================================');
-    $logger->raw(' 統計');
+    $logger->raw(' Summary');
     $logger->raw('==========================================');
-    $logger->raw(sprintf('  總處理   ：%d', $stats['total']));
-    $logger->raw(sprintf('  成功 ok  ：%d', $stats['ok']));
-    $logger->raw(sprintf('  未知 unk ：%d', $stats['unknown']));
-    $logger->raw(sprintf('  錯誤 err ：%d', $stats['error']));
-    $logger->raw(sprintf('  跳過 skip：%d', $skipped));
+    $logger->raw(sprintf('  Total       : %d', $stats['total']));
+    $logger->raw(sprintf('  OK          : %d', $stats['ok']));
+    $logger->raw(sprintf('  Unknown     : %d', $stats['unknown']));
+    $logger->raw(sprintf('  Error       : %d', $stats['error']));
+    $logger->raw(sprintf('  Skipped     : %d', $skipped));
     $logger->raw('  -----------------------');
-    $logger->raw(sprintf('  AI 平均  ：%.0f ms/筆', $avgMs));
-    $logger->raw(sprintf('  總耗時   ：%.1f 秒', $elapsed));
-    $logger->raw(sprintf('  結果路徑 ：%s', $dayDir));
-    $logger->raw(sprintf('  Log 檔   ：%s', $logger->file()));
+    $logger->raw(sprintf('  AI avg      : %.0f ms/doc', $avgMs));
+    $logger->raw(sprintf('  Total time  : %.1f s', $elapsed));
+    $logger->raw(sprintf('  Data dir    : %s', $cfg['paths']['data_dir']));
+    $logger->raw(sprintf('  Log file    : %s', $logger->file()));
 
     exit($stats['error'] > 0 ? 2 : 0);
 }
@@ -518,15 +581,22 @@ function h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SU
 
 function render_web(array $cfg): void
 {
-    $store = new JsonStore($cfg['paths']['data_dir']);
+    $store     = new JsonStore($cfg['paths']['data_dir']);
+    $rangeDays = max(1, (int)($cfg['web']['range_days'] ?? 5));
 
-    // ?date=YYYYMMDD 必須 8 位數字；預設今天
-    $dateStr = (string)($_GET['date'] ?? date('Ymd'));
-    if (!preg_match('/^\d{8}$/', $dateStr)) {
-        $dateStr = date('Ymd');
+    // 模式判斷：
+    //   ?date=YYYYMMDD → 單日檢視
+    //   無此參數       → 預設聚合最近 N 天（含今天）
+    $rawDate = (string)($_GET['date'] ?? '');
+    $singleDayMode = ($rawDate !== '' && preg_match('/^\d{8}$/', $rawDate));
+
+    if ($singleDayMode) {
+        $dateStr = $rawDate;
+        $records = $store->listForDate($dateStr);
+    } else {
+        $dateStr = date('Ymd');         // 日期選擇器顯示用
+        $records = $store->listForRange($rangeDays);
     }
-
-    $records = $store->listForDate($dateStr);
 
     $stats  = ['total' => count($records), 'ok' => 0, 'unknown' => 0, 'error' => 0];
     $byUnit = [];
@@ -565,7 +635,7 @@ function render_web(array $cfg): void
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<title><?= h($title) ?> - <?= h($displayDate) ?></title>
+<title><?= h($title) ?> - <?= $singleDayMode ? h($displayDate) : ('最近 ' . (int)$rangeDays . ' 天') ?></title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <?php if ($autoRefresh > 0): ?>
 <meta http-equiv="refresh" content="<?= (int)$autoRefresh ?>">
@@ -587,6 +657,9 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
 .datepick-form label{font-size:13px;color:var(--muted);}
 .datepick-form input[type=date]{margin-left:6px;padding:6px 10px;border:1px solid var(--border);
   border-radius:6px;font-size:14px;}
+.rangebtn{margin-left:8px;padding:6px 12px;border:1px solid var(--accent);color:var(--accent);
+  background:#fff;border-radius:6px;font-size:13px;text-decoration:none;transition:all .15s;}
+.rangebtn:hover{background:var(--accent);color:#fff;}
 .ts{color:var(--muted);font-size:12px;}
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:16px 24px;}
 .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 18px;box-shadow:var(--shadow);}
@@ -641,12 +714,24 @@ table#grid{width:100%;border-collapse:separate;border-spacing:0;background:#fff;
 </head>
 <body>
 <header class="topbar">
-  <h1><?= h($title) ?></h1>
+  <h1>
+    <?= h($title) ?>
+    <span style="font-size:13px;color:var(--muted);font-weight:400;margin-left:8px">
+      <?php if ($singleDayMode): ?>
+        單日：<?= h($displayDate) ?>
+      <?php else: ?>
+        範圍：最近 <?= (int)$rangeDays ?> 天（含今天）
+      <?php endif; ?>
+    </span>
+  </h1>
   <div class="datepick">
     <form method="get" class="datepick-form">
-      <label>日期
-        <input type="date" name="date" value="<?= h($displayDate) ?>" onchange="this.form.submit()">
+      <label>單日檢視
+        <input type="date" name="date" value="<?= $singleDayMode ? h($displayDate) : '' ?>" onchange="this.form.submit()">
       </label>
+      <?php if ($singleDayMode): ?>
+        <a href="?" class="rangebtn" title="清除日期，回到最近 <?= (int)$rangeDays ?> 天聚合檢視">回到最近 <?= (int)$rangeDays ?> 天</a>
+      <?php endif; ?>
       <noscript><button type="submit">查詢</button></noscript>
     </form>
     <span class="ts">最後更新：<?= h(date('Y-m-d H:i:s')) ?><?php if ($autoRefresh > 0): ?>（每 <?= (int)$autoRefresh ?> 秒自動重整）<?php endif; ?></span>
@@ -688,7 +773,12 @@ table#grid{width:100%;border-collapse:separate;border-spacing:0;background:#fff;
 <main>
 <?php if (empty($records)): ?>
   <div class="empty">
-    今日（<?= h($displayDate) ?>）尚無資料。<br>
+    <?php if ($singleDayMode): ?>
+      <?= h($displayDate) ?> 尚無資料。
+    <?php else: ?>
+      最近 <?= (int)$rangeDays ?> 天尚無資料。
+    <?php endif; ?>
+    <br>
     請確認：(1) <code>ssh_tunnel.bat</code> 在跑；(2) Windows 工作排程器已設定每 5 分鐘觸發 <code>run_classify.bat</code>；<br>
     或在本資料夾手動執行 <code>php index.php</code> 觀察錯誤。
   </div>

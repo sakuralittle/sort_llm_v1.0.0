@@ -21,8 +21,11 @@ pushd "%~dp0"
 
 if not exist "logs" mkdir "logs"
 
+REM ---- ASCII-safe timestamp via PowerShell (avoids zh-TW %DATE% with day-of-week)
+for /f "delims=" %%T in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd HH:mm:ss')"') do set NOW=%%T
+
 echo. >> "logs\scheduler.log"
-echo ========== %DATE% %TIME% ========== >> "logs\scheduler.log"
+echo ========== %NOW% ========== >> "logs\scheduler.log"
 %PHP_BIN% "index.php" >> "logs\scheduler.log" 2>&1
 set RC=%ERRORLEVEL%
 echo (exit code %RC%) >> "logs\scheduler.log"
