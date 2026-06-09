@@ -7,17 +7,15 @@
 DirectoryIndex index.php
 Options -Indexes -MultiViews
 
-# ---- IP 白名單：僅允許指定網段連線 ----
-# 允許：
-#   163.22.186.0/24       （校內公開網段）
-#   192.168.0.0/16        （內網；註：原本寫 192.168.1.0/16，依 CIDR 實際生效範圍為 192.168.0.0/16）
-#   127.0.0.1 / ::1       （本機，方便伺服器端測試；不需要可刪除）
-<RequireAny>
-    Require ip 163.22.186.0/24
-    Require ip 192.168.0.0/16
-    Require ip 127.0.0.1
-    Require ip ::1
-</RequireAny>
+# ---- IP 白名單（暫時停用） ----
+# 若需重新啟用，取消下方 <RequireAny> 區塊註解即可。
+# 注意：請先確認您的對外 IP 在白名單內，否則會把自己擋掉。
+# <RequireAny>
+#     Require ip 163.22.186.0/24
+#     Require ip 192.168.0.0/16
+#     Require ip 127.0.0.1
+#     Require ip ::1
+# </RequireAny>
 
 # ---- 阻擋直接存取設定檔（含 DB 密碼）----
 <Files "config.php">
